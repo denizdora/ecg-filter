@@ -1,0 +1,4 @@
+streamlit
+neurokit2
+matplotlib
+numpy

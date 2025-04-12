@@ -7,8 +7,8 @@ import matplotlib.pyplot as plt
 st.title("Step 1 & 2: Clean and Noisy ECG (Interactive Version)")
 
 # Interactive parameters
-noise_std = st.slider("Noise Standard Deviation", min_value=0.0, max_value=1.0, value=0.2, step=0.01)
-duration = st.slider("Duration (seconds)", min_value=5, max_value=30, value=20, step=1)
+noise_std = st.slider("Noise Standard Deviation", min_value=0.0, max_value=0.3, value=0.2, step=0.05)
+duration = 20
 fs = 200  # Hz
 
 # Cached ECG simulation
@@ -63,12 +63,12 @@ ax3.legend()
 st.pyplot(fig3)
 
 # Optional zoom-in toggle
-if st.checkbox("Show Zoomed-in Segment (First 2 Seconds)"):
-    idx_zoom = int(2 * fs)
+if st.checkbox("Show Zoomed-in Segment (First 5 Seconds)"):
+    idx_zoom = int(5 * fs)
     fig4, ax4 = plt.subplots(figsize=(12, 3))
     ax4.plot(time[:idx_zoom], ecg_noisy[:idx_zoom], label="Noisy ECG", color="red", alpha=0.6)
     ax4.plot(time[:idx_zoom], ecg_clean[:idx_zoom], label="Clean ECG", color="blue", linestyle="--")
-    ax4.set_title("Zoomed View: First 2 Seconds")
+    ax4.set_title("Zoomed View: First 5 Seconds")
     ax4.set_xlabel("Time (s)")
     ax4.set_ylabel("Amplitude")
     ax4.grid(True)

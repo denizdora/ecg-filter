@@ -156,7 +156,7 @@ noise_std = st.sidebar.slider("Noise Standard Deviation", min_value=0.0, max_val
 st.sidebar.markdown("---") # Separator
 
 st.sidebar.header("Wiener Filter Parameters")
-wiener_order = st.sidebar.slider("Wiener Filter Order (p)", min_value=1, max_value=20, value=4, step=1, help="The number of filter taps (p for causal, 2p+1 for symmetric). Higher order means more complex filter, potentially better fit but risk of overfitting/instability.", key="wiener_order")
+wiener_order = st.sidebar.slider("Wiener Filter Order (p)", min_value=1, max_value=9, value=4, step=1, help="The number of filter taps (p for causal, 2p+1 for symmetric). Higher order means more complex filter, potentially better fit but risk of overfitting/instability.", key="wiener_order")
 wiener_symmetric = st.sidebar.checkbox("Use Symmetric (Non-Causal) Filter", value=False, help="A symmetric filter uses past, present, and future samples (2p+1 taps). This is non-causal and requires buffering in real-time applications, but can provide better performance.", key="wiener_symmetric")
 
 st.sidebar.markdown("---") # Separator

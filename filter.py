@@ -65,7 +65,9 @@ def apply_wiener_filter(noisy_signal: np.ndarray, clean_signal: np.ndarray, orde
             autocorr_for_toeplitz = phi_xx_full[center_idx : center_idx + order] / N
             if len(autocorr_for_toeplitz) != order:
                  raise ValueError(f"Incorrect autocorrelation length for causal Rxx. Expected {order}, got {len(autocorr_for_toeplitz)}")
+            
             Rxx = toeplitz(autocorr_for_toeplitz)
+            Rxx_raw = Rxx.copy()
 
             # Rxs vector needs lags 0 to p-1
             Rxs = phi_xs_full[center_idx : center_idx + order] / N
@@ -82,7 +84,9 @@ def apply_wiener_filter(noisy_signal: np.ndarray, clean_signal: np.ndarray, orde
             autocorr_for_toeplitz = phi_xx_full[center_idx : center_idx + L] / N
             if len(autocorr_for_toeplitz) != L:
                  raise ValueError(f"Incorrect autocorrelation length for symmetric Rxx. Expected {L}, got {len(autocorr_for_toeplitz)}")
+            
             Rxx = toeplitz(autocorr_for_toeplitz)
+            Rxx_raw = Rxx.copy()
 
             # Rxs vector needs lags -p to +p
             # Indices: center_idx - p to center_idx + p
@@ -128,6 +132,7 @@ def apply_wiener_filter(noisy_signal: np.ndarray, clean_signal: np.ndarray, orde
     return filtered_signal, dict(
         h=h_wiener,        # impulse response
         Rxx=Rxx_reg,       # regularised autocorr matrix
+        Rxx_raw=Rxx_raw,   # unregularised autocorr matrix
         Rxs=Rxs,           # cross‑corr vector
         symmetric=symmetric, # Store type for display
         order=order # Store order for display
@@ -148,7 +153,7 @@ In this simulation, we generate a synthetic clean ECG, add noise, and then apply
 # --- Sidebar Controls ---
 st.sidebar.header("Simulation Parameters")
 # Using unique keys for sliders for better stability in Streamlit
-duration = st.sidebar.slider("Signal Duration (s)", min_value=10, max_value=30, value=20, step=5, key="sim_duration")
+duration = st.sidebar.slider("Signal Duration (s)", min_value=15, max_value=30, value=20, step=5, key="sim_duration")
 fs = 200
 st.sidebar.write(f"Sampling Frequency: **{fs} Hz**")
 noise_std = st.sidebar.slider("Noise Standard Deviation", min_value=0.0, max_value=0.4, value=0.2, step=0.05, key="noise_std")
@@ -252,7 +257,7 @@ if detailed:
         # -- Impulse response ---------------------------------
         with col_detailed1:
             st.markdown("#### Wiener filter impulse response $h[n]$")
-            st.markdown(f"Filter Length: {len(wiener_info['h'])} taps")
+            st.markdown(f"Filter Order: {len(wiener_info['h'])}")
 
             fig_h, ax_h = plt.subplots(figsize=(6, 3))
             ax_h.stem(np.arange(len(wiener_info['h'])), wiener_info["h"]) # Use np.arange for tap index
@@ -262,29 +267,115 @@ if detailed:
             ax_h.grid(True, alpha=0.4)
             st.pyplot(fig_h)
 
-        # -- Correlation matrices / vectors -----------------------------
-        with col_detailed2:
-            with st.expander("View Correlation Matrices / Vectors"):
-                st.write("$\\mathbf R_{xx}$: Autocorrelation matrix of $x[n]$ (first 10×10 block shown)")
-                st.write("Shape:", wiener_info["Rxx"].shape)
-                st.dataframe(wiener_info["Rxx"][:10, :10].round(4)) # Show first 10x10 block
-
-                st.write("$\\mathbf r_{xs}$: Cross-correlation vector between $x[n]$ and $s[n]$")
-                st.write("Shape:", wiener_info["Rxs"].shape)
-                # Display Rxs as a column vector for clarity if not too long, otherwise show head
-                if len(wiener_info["Rxs"]) <= 20: # Display full vector if short
-                     st.dataframe(wiener_info["Rxs"].reshape(-1, 1).round(4))
-                else: # Display head and tail if long
-                     st.dataframe(np.vstack([wiener_info["Rxs"][:10], wiener_info["Rxs"][-10:]]).round(4),
-                                   column_names=["value"],
-                                   row_index=["0", "1", ..., "9", "...", f"{len(wiener_info['Rxs'])-10}", ..., f"{len(wiener_info['Rxs'])-1}"])
-
-
     else:
         st.warning("Detailed internals are not available because the Wiener filter could not be computed.")
 
 # --- Plotting ---
 st.markdown("---") # Separator
+
+with st.expander("Step 1: Autocorrelation of Noisy Signal (Zoomed)"):
+    st.markdown("This is the zoomed-in autocorrelation of the noisy ECG signal near lag $k=0$, which is most relevant to Wiener filter design.")
+
+    full_autocorr = np.correlate(ecg_noisy, ecg_noisy, mode='full') / len(ecg_noisy)
+    lags = np.arange(-len(ecg_noisy) + 1, len(ecg_noisy))
+
+    lag_limit = 500
+    center_idx = len(full_autocorr) // 2
+    zoom_autocorr = full_autocorr[center_idx - lag_limit : center_idx + lag_limit + 1]
+    zoom_lags = lags[center_idx - lag_limit : center_idx + lag_limit + 1]
+
+    fig_ac, ax_ac = plt.subplots(figsize=(8, 3))
+    ax_ac.plot(zoom_lags, zoom_autocorr)
+    ax_ac.set_title("Autocorrelation of Noisy Signal $\\phi_{xx}[k]$ (Zoomed)")
+    ax_ac.set_xlabel("Lag $k$")
+    ax_ac.set_ylabel("Amplitude")
+    ax_ac.grid(True)
+    fig_ac.tight_layout()
+
+    st.pyplot(fig_ac)
+
+with st.expander("Step 2: Cross-Correlation Between Noisy and Clean Signal (Zoomed)"):
+    st.markdown("""
+    This is the zoomed-in cross-correlation between the noisy input $x[n]$ and clean signal $s[n]$ around lag $k=0$.
+    This range is especially important in computing $\\mathbf{r}_{xs}$ in the Wiener-Hopf equation.
+    """)
+
+    crosscorr = np.correlate(ecg_noisy, ecg_clean, mode="full") / len(ecg_noisy)
+    lags_xs = np.arange(-len(ecg_noisy) + 1, len(ecg_noisy))
+
+    lag_limit = 500
+    center_idx = len(crosscorr) // 2
+    zoom_crosscorr = crosscorr[center_idx - lag_limit : center_idx + lag_limit + 1]
+    zoom_lags_xs = lags_xs[center_idx - lag_limit : center_idx + lag_limit + 1]
+
+    fig_cc, ax_cc = plt.subplots(figsize=(8, 3))
+    ax_cc.plot(zoom_lags_xs, zoom_crosscorr)
+    ax_cc.set_title("Cross-Correlation $\\phi_{xs}[k]$ Between $x[n]$ and $s[n]$ (Zoomed)")
+    ax_cc.set_xlabel("Lag $k$")
+    ax_cc.set_ylabel("Amplitude")
+    ax_cc.grid(True)
+    fig_cc.tight_layout()
+
+    st.pyplot(fig_cc)
+
+with st.expander("Note on Lag $k$"):
+    st.markdown("""
+    **Note on Lag $k$:**  
+    The x-axis shows how much we shift one signal relative to the other.  
+    - $k = 0$ means both signals are aligned.  
+    - $k > 0$ means $s[n]$ is shifted right (future values of $s$).  
+    - $k < 0$ means $s[n]$ is shifted left (past values of $s$).  
+
+    This tells us how well the noisy and clean signals correlate when offset in time.
+    """)
+
+with st.expander("Step 3: Regularization of $\\mathbf{R}_{xx}$ Matrix"):
+    st.markdown("""
+    The autocorrelation matrix $\\mathbf{R}_{xx}$ is regularized by adding a small constant $\\epsilon = 10^{-6}$ to its diagonal.  
+    This ensures the matrix is invertible and improves numerical stability.
+
+    $$
+    \\mathbf{R}_{xx}^{\\text{reg}} = \\mathbf{R}_{xx} + \\epsilon \\cdot \\mathbf{I}
+    $$
+    """)
+
+    if "Rxx_raw" in wiener_info:
+        col_raw, col_reg = st.columns(2)
+        diff = wiener_info["Rxx"][:10, :10] - wiener_info["Rxx_raw"][:10, :10]
+        st.write("🔍 Difference Matrix (should only show non-zero on diagonal):")
+        st.dataframe(diff.round(6))
+        with col_raw:
+            st.markdown("**Unregularized $\\mathbf{R}_{xx}$** (Top 10×10 Block)")
+            st.dataframe(wiener_info["Rxx_raw"][:10, :10].round(6))
+
+        with col_reg:
+            st.markdown("**Regularized $\\mathbf{R}_{xx}^{\\text{reg}}$** (Top 10×10 Block)")
+            st.dataframe(wiener_info["Rxx"][:10, :10].round(6))
+    else:
+        st.warning("Unregularized matrix not available.")
+
+with st.expander("Step 4: Filtered Output as Convolution"):
+    st.markdown("""
+    The final filtered signal $y[n]$ is produced by **convolving** the noisy ECG $x[n]$ with the Wiener filter's impulse response $h[n]$:
+    $$
+    y[n] = x[n] * h[n]
+    $$
+    This means that each point in the output is a weighted sum of nearby noisy samples, where the weights are given by $h[n]$.
+    """)
+
+    fig_conv, ax_conv = plt.subplots(figsize=(14, 4))
+    ax_conv.plot(time, ecg_clean, label="Clean ECG $s[n]$", linestyle="--", color="blue", alpha=0.8)
+    ax_conv.plot(time, ecg_noisy, label="Noisy ECG $x[n]$", color="red", alpha=0.5)
+    ax_conv.plot(time, ecg_filtered, label="Filtered Output $y[n] = x[n] * h[n]$", color="green", linewidth=1.5)
+    ax_conv.set_title("Convolution Output of Wiener Filter")
+    ax_conv.set_xlabel("Time (s)")
+    ax_conv.set_ylabel("Amplitude")
+    ax_conv.grid(True, linestyle="--", alpha=0.5)
+    ax_conv.legend()
+    st.pyplot(fig_conv)
+
+st.markdown("---") # Separator
+
 st.subheader("Time Domain Signal Plots")
 
 # Plot 1: Overlay

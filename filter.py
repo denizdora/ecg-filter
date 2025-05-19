@@ -161,8 +161,29 @@ noise_std = st.sidebar.slider("Noise Standard Deviation", min_value=0.0, max_val
 st.sidebar.markdown("---") # Separator
 
 st.sidebar.header("Wiener Filter Parameters")
-wiener_order = st.sidebar.slider("Wiener Filter Order (p)", min_value=1, max_value=9, value=4, step=1, help="The number of filter taps (p for causal, 2p+1 for symmetric). Higher order means more complex filter, potentially better fit but risk of overfitting/instability.", key="wiener_order")
-wiener_symmetric = st.sidebar.checkbox("Use Symmetric (Non-Causal) Filter", value=False, help="A symmetric filter uses past, present, and future samples (2p+1 taps). This is non-causal and requires buffering in real-time applications, but can provide better performance.", key="wiener_symmetric")
+wiener_order = st.sidebar.slider(
+    "Wiener Filter Order (p)",
+    min_value=1,
+    max_value=9,
+    value=4,
+    step=1,
+    help="Sets the order parameter 'p'.\n"
+         "*   For a **causal** filter (symmetric unchecked), the filter will have **'p' taps**.\n"
+         "*   For a **symmetric** (non-causal) filter (checkbox checked), the filter will have **'2p+1' taps**.\n"
+         "A higher 'p' allows for a more complex filter, potentially improving noise reduction "
+         "but increasing computational cost and risk of overfitting.",
+    key="wiener_order"
+)
+
+wiener_symmetric = st.sidebar.checkbox(
+    "Use Symmetric (Non-Causal) Filter",
+    value=False, # Or True, if you want symmetric by default
+    help="If checked, a symmetric (non-causal) filter is used. It considers past, present, "
+         "and future samples, resulting in **'2p+1' total taps** (where 'p' is the 'Wiener Filter Order' "
+         "selected above). Typically offers better performance but requires access to future data "
+         "(buffering in real-time).",
+    key="wiener_symmetric"
+)
 
 st.sidebar.markdown("---") # Separator
 

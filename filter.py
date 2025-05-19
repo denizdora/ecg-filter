@@ -4,10 +4,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.linalg import toeplitz
 import matplotlib.ticker as ticker # For frequency plot formatting
+from scipy.signal import welch
+
 
 # Set a fixed random state for reproducibility of simulation and noise
 RANDOM_STATE = 42
 np.random.seed(RANDOM_STATE)
+
+def mirror_spectrum(f, Pxx):
+    f_mirrored = np.concatenate([-f[::-1], f[1:]])
+    Pxx_mirrored = np.concatenate([Pxx[::-1], Pxx[1:]])
+    return f_mirrored, Pxx_mirrored
 
 # --- Wiener Filter Implementation ---
 
@@ -258,7 +265,7 @@ else:
 # ---------- DETAILED EXPLANATION & INTERNALS SECTION ---------------------------------
 if detailed:
     st.markdown("---") # Separator
-    st.markdown("## 🔬 Detailed Explanation & Internals")
+    st.markdown("## Detailed Explanation & Internals")
 
     if wiener_info is not None:
         st.markdown("""
@@ -290,11 +297,10 @@ if detailed:
 
     else:
         st.warning("Detailed internals are not available because the Wiener filter could not be computed.")
-
-# --- Plotting ---
-st.markdown("---") # Separator
-
-with st.expander("Step 1: Autocorrelation of Noisy Signal (Zoomed)"):
+if detailed:
+    st.markdown("---")
+    st.markdown("## Step-by-Step Internals & Visualizations")
+    st.markdown("#### Step 1: Autocorrelation of Noisy Signal (Zoomed)")
     st.markdown("This is the zoomed-in autocorrelation of the noisy ECG signal near lag $k=0$, which is most relevant to Wiener filter design.")
 
     full_autocorr = np.correlate(ecg_noisy, ecg_noisy, mode='full') / len(ecg_noisy)
@@ -311,11 +317,11 @@ with st.expander("Step 1: Autocorrelation of Noisy Signal (Zoomed)"):
     ax_ac.set_xlabel("Lag $k$")
     ax_ac.set_ylabel("Amplitude")
     ax_ac.grid(True)
-    fig_ac.tight_layout()
+
 
     st.pyplot(fig_ac)
 
-with st.expander("Step 2: Cross-Correlation Between Noisy and Clean Signal (Zoomed)"):
+    st.markdown("#### Step 2: Cross-Correlation Between Noisy and Clean Signal (Zoomed)")
     st.markdown("""
     This is the zoomed-in cross-correlation between the noisy input $x[n]$ and clean signal $s[n]$ around lag $k=0$.
     This range is especially important in computing $\\mathbf{r}_{xs}$ in the Wiener-Hopf equation.
@@ -339,18 +345,18 @@ with st.expander("Step 2: Cross-Correlation Between Noisy and Clean Signal (Zoom
 
     st.pyplot(fig_cc)
 
-with st.expander("Note on Lag $k$"):
-    st.markdown("""
-    **Note on Lag $k$:**  
-    The x-axis shows how much we shift one signal relative to the other.  
-    - $k = 0$ means both signals are aligned.  
-    - $k > 0$ means $s[n]$ is shifted right (future values of $s$).  
-    - $k < 0$ means $s[n]$ is shifted left (past values of $s$).  
+    with st.expander("#### Note on Lag $k$"):
+        st.markdown("""
+        **Note on Lag $k$:**  
+        The x-axis shows how much we shift one signal relative to the other.  
+        - $k = 0$ means both signals are aligned.  
+        - $k > 0$ means $s[n]$ is shifted right (future values of $s$).  
+        - $k < 0$ means $s[n]$ is shifted left (past values of $s$).  
 
-    This tells us how well the noisy and clean signals correlate when offset in time.
-    """)
+        This tells us how well the noisy and clean signals correlate when offset in time.
+        """)
 
-with st.expander("Step 3: Regularization of $\\mathbf{R}_{xx}$ Matrix"):
+    st.markdown("#### Step 3: Regularization of $\\mathbf{R}_{xx}$ Matrix")
     st.markdown("""
     The autocorrelation matrix $\\mathbf{R}_{xx}$ is regularized by adding a small constant $\\epsilon = 10^{-6}$ to its diagonal.  
     This ensures the matrix is invertible and improves numerical stability.
@@ -363,11 +369,11 @@ with st.expander("Step 3: Regularization of $\\mathbf{R}_{xx}$ Matrix"):
     if "Rxx_raw" in wiener_info:
         col_raw, col_reg = st.columns(2)
         diff = wiener_info["Rxx"][:10, :10] - wiener_info["Rxx_raw"][:10, :10]
-        st.write("🔍 Difference Matrix (should only show non-zero on diagonal):")
-        st.dataframe(diff.round(6))
         with col_raw:
             st.markdown("**Unregularized $\\mathbf{R}_{xx}$** (Top 10×10 Block)")
             st.dataframe(wiener_info["Rxx_raw"][:10, :10].round(6))
+            st.write("Difference Matrix (should only show non-zero on diagonal):")
+            st.dataframe(diff.round(6))
 
         with col_reg:
             st.markdown("**Regularized $\\mathbf{R}_{xx}^{\\text{reg}}$** (Top 10×10 Block)")
@@ -375,7 +381,7 @@ with st.expander("Step 3: Regularization of $\\mathbf{R}_{xx}$ Matrix"):
     else:
         st.warning("Unregularized matrix not available.")
 
-with st.expander("Step 4: Filtered Output as Convolution"):
+    st.markdown("#### Step 4: Filtered Output as Convolution")
     st.markdown("""
     The final filtered signal $y[n]$ is produced by **convolving** the noisy ECG $x[n]$ with the Wiener filter's impulse response $h[n]$:
     $$
@@ -395,46 +401,179 @@ with st.expander("Step 4: Filtered Output as Convolution"):
     ax_conv.legend()
     st.pyplot(fig_conv)
 
-st.markdown("---") # Separator
-
+st.markdown("---")
 st.subheader("Time Domain Signal Plots")
 
-# Plot 1: Overlay
-fig_compare, ax_compare = plt.subplots(figsize=(14, 4))
-ax_compare.plot(time, ecg_noisy, label=f"Noisy (MSE={mse_noisy:.4f})", color="red", alpha=0.7, linewidth=1.0)
-if ecg_filtered is not None:
-    mse_filtered = np.mean((ecg_filtered - ecg_clean)**2) # Recalculate MSE just for plot label
-    ax_compare.plot(time, ecg_filtered, label=f"Wiener Filtered ({filter_params_str}, MSE={mse_filtered:.4f})", color="green", alpha=0.9, linewidth=1.5)
+# Checkboxes to select which signals to show
+show_clean = st.checkbox("Show Clean ECG", value=True)
+show_noisy = st.checkbox("Show Noisy ECG", value=True)
+show_filtered = st.checkbox("Show Filtered ECG", value=True if ecg_filtered is not None else False)
+
+# Main full-length signal plot
+fig_dynamic, ax_dynamic = plt.subplots(figsize=(14, 4))
+plotted_any_main = False
+
+if show_noisy:
+    ax_dynamic.plot(time, ecg_noisy, label="Noisy ECG", color="red", alpha=0.7)
+    plotted_any_main = True
+
+if show_filtered and ecg_filtered is not None:
+    ax_dynamic.plot(time, ecg_filtered, label=f"Wiener Filtered ({filter_params_str})", color="green", linewidth=1.5)
+    plotted_any_main = True
+
+if show_clean:
+    ax_dynamic.plot(time, ecg_clean, label="Clean ECG", color="blue", linestyle="--", alpha=0.8)
+    plotted_any_main = True
+
+if not plotted_any_main:
+    st.warning("Select at least one signal to display.")
 else:
-     # Plot a placeholder if filtering failed
-     ax_compare.plot([], [], label="Wiener Filtered (Failed)", color="green") # Empty plot entry
-ax_compare.plot(time, ecg_clean, label="Clean ECG", color="blue", linestyle="--", alpha=0.8, linewidth=1.0)
-ax_compare.set_xlabel("Time (s)")
-ax_compare.set_ylabel("Amplitude")
-ax_compare.set_title("Overlay: Clean, Noisy, and Wiener Filtered ECG")
-ax_compare.grid(True, which='both', linestyle='--', linewidth=0.5)
-ax_compare.legend()
-ax_compare.set_xlim(0, duration)
-st.pyplot(fig_compare)
+    ax_dynamic.set_title("ECG Signals in Time Domain (Selected Signals)")
+    ax_dynamic.set_xlabel("Time (s)")
+    ax_dynamic.set_ylabel("Amplitude")
+    ax_dynamic.grid(True, which='both', linestyle='--', linewidth=0.5)
+    ax_dynamic.set_xlim(0, duration)
+    ax_dynamic.legend()
+    st.pyplot(fig_dynamic)
+
 
 # Optional zoom-in toggle
 zoom_plot = st.checkbox("Show Zoomed-in Signal Plot", value=True, key="show_zoom_plot")
+
 if zoom_plot:
-    max_zoom = min(duration, 10.0) # Limit max zoom duration to a reasonable value
-    zoom_duration = st.slider("Zoom Duration (s)", min_value=0.5, max_value=max_zoom, value=min(3.0, max_zoom), step=0.25, key="signal_zoom_slider")
+    max_zoom = min(duration, 10.0)
+    zoom_duration = st.slider("Zoom Duration (s)", min_value=1.0, max_value=max_zoom,
+                              value=min(3.0, max_zoom), step=0.5, key="signal_zoom_slider")
     idx_zoom = int(zoom_duration * fs)
 
     fig_zoom, ax_zoom = plt.subplots(figsize=(14, 4))
-    ax_zoom.plot(time[:idx_zoom], ecg_noisy[:idx_zoom], label="Noisy ECG", color="red", alpha=0.7)
-    if ecg_filtered is not None:
-        ax_zoom.plot(time[:idx_zoom], ecg_filtered[:idx_zoom], label=f"Wiener Filtered ({filter_params_str})", color="green", alpha=0.9, linewidth=1.5)
+
+    plotted_any = False
+
+    if show_noisy:
+        ax_zoom.plot(time[:idx_zoom], ecg_noisy[:idx_zoom], label="Noisy ECG", color="red", alpha=0.7)
+        plotted_any = True
+
+    if show_filtered and ecg_filtered is not None:
+        ax_zoom.plot(time[:idx_zoom], ecg_filtered[:idx_zoom],
+                     label=f"Wiener Filtered ({filter_params_str})", color="green", linewidth=1.5)
+        plotted_any = True
+
+    if show_clean:
+        ax_zoom.plot(time[:idx_zoom], ecg_clean[:idx_zoom], label="Clean ECG", color="blue",
+                     linestyle="--", alpha=0.8)
+        plotted_any = True
+
+    if not plotted_any:
+        st.warning("Select at least one signal to display in the zoom view.")
     else:
-        ax_zoom.plot([], [], label="Wiener Filtered (Failed)", color="green") # Empty plot entry
-    ax_zoom.plot(time[:idx_zoom], ecg_clean[:idx_zoom], label="Clean ECG", color="blue", linestyle="--", alpha=0.8)
-    ax_zoom.set_title(f"Zoomed Signal View: First {zoom_duration:.2f} Seconds")
-    ax_zoom.set_xlabel("Time (s)")
-    ax_zoom.set_ylabel("Amplitude")
-    ax_zoom.grid(True, which='both', linestyle='--', linewidth=0.5)
-    ax_zoom.legend()
-    ax_zoom.set_xlim(0, zoom_duration) # Ensure x-axis matches slider
-    st.pyplot(fig_zoom)
+        ax_zoom.set_title(f"Zoomed Signal View: First {zoom_duration:.2f} Seconds")
+        ax_zoom.set_xlabel("Time (s)")
+        ax_zoom.set_ylabel("Amplitude")
+        ax_zoom.grid(True, which='both', linestyle='--', linewidth=0.5)
+        ax_zoom.set_xlim(0, zoom_duration)
+        ax_zoom.legend()
+        st.pyplot(fig_zoom)
+
+# Welch PSD for each signal
+f_clean, Pxx_clean = welch(ecg_clean, fs=fs, nperseg=1024)
+f_noisy, Pxx_noisy = welch(ecg_noisy, fs=fs, nperseg=1024)
+if ecg_filtered is not None:
+    f_filtered, Pxx_filtered = welch(ecg_filtered, fs=fs, nperseg=1024)
+
+f_clean_sym, Pxx_clean_sym = mirror_spectrum(f_clean, Pxx_clean)
+f_noisy_sym, Pxx_noisy_sym = mirror_spectrum(f_noisy, Pxx_noisy)
+if ecg_filtered is not None:
+    f_filtered_sym, Pxx_filtered_sym = mirror_spectrum(f_filtered, Pxx_filtered)
+
+# Y-axis range for consistent comparison
+ymin = -0.7
+ymax = 1.7
+
+st.markdown("---")
+st.subheader("Time & Frequency Domain Comparison")
+
+T_VIS = 10  # seconds to show in time domain comparison
+idx_vis = int(T_VIS * fs)
+
+# Row 1: Clean ECG
+col1, col2 = st.columns(2)
+
+with col1:
+    fig_clean_time, ax_clean_time = plt.subplots(figsize=(6, 3))
+    ax_clean_time.plot(time[:idx_vis], ecg_clean[:idx_vis], color="blue")
+    ax_clean_time.set_title("Clean ECG (Time Domain, First 10s)")
+    ax_clean_time.set_xlabel("Time (s)")
+    ax_clean_time.set_ylabel("Amplitude")
+    ax_clean_time.set_ylim(ymin, ymax)
+    ax_clean_time.axhline(0, color='black', linewidth=0.5)
+    ax_clean_time.grid(True, linestyle='--', alpha=0.5)
+    st.pyplot(fig_clean_time)
+
+with col2:
+    fig_clean_psd, ax_clean_psd = plt.subplots(figsize=(6, 3))
+    ax_clean_psd.semilogy(f_clean_sym, Pxx_clean_sym, color="blue")
+    ax_clean_psd.set_title("Clean ECG (Power Spectral Density)")
+    ax_clean_psd.set_xlabel("Frequency (Hz)")
+    ax_clean_psd.set_ylabel("Power/Frequency")
+    ax_clean_time.set_xlim(0, T_VIS)
+    ax_clean_psd.set_xlim(-100, 100)
+    ax_clean_psd.grid(True, linestyle="--", alpha=0.5)
+    st.pyplot(fig_clean_psd)
+
+
+# Row 2: Noisy ECG
+col3, col4 = st.columns(2)
+
+with col3:
+    fig_noisy_time, ax_noisy_time = plt.subplots(figsize=(6, 3))
+    ax_noisy_time.plot(time[:idx_vis], ecg_noisy[:idx_vis], color="red", alpha=0.7)
+    ax_noisy_time.set_title("Noisy ECG (Time Domain, First 10s)")
+    ax_noisy_time.set_xlabel("Time (s)")
+    ax_noisy_time.set_ylabel("Amplitude")
+    ax_noisy_time.set_ylim(ymin, ymax)
+    ax_noisy_time.axhline(0, color='black', linewidth=0.5)
+    ax_noisy_time.grid(True, linestyle='--', alpha=0.5)
+    st.pyplot(fig_noisy_time)
+
+with col4:
+    fig_noisy_psd, ax_noisy_psd = plt.subplots(figsize=(6, 3))
+    ax_noisy_psd.semilogy(f_noisy_sym, Pxx_noisy_sym, color="red")
+    ax_noisy_psd.set_title("Noisy ECG (Power Spectral Density)")
+    ax_noisy_psd.set_xlabel("Frequency (Hz)")
+    ax_noisy_psd.set_ylabel("Power/Frequency")
+    ax_noisy_time.set_xlim(0, T_VIS)
+    ax_noisy_psd.set_xlim(-100, 100)
+    ax_noisy_psd.grid(True, linestyle="--", alpha=0.5)
+    st.pyplot(fig_noisy_psd)
+
+# Row 3: Filtered ECG
+col5, col6 = st.columns(2)
+
+with col5:
+    fig_filt_time, ax_filt_time = plt.subplots(figsize=(6, 3))
+    if ecg_filtered is not None:
+        ax_filt_time.plot(time[:idx_vis], ecg_filtered[:idx_vis], color="green")
+        ax_filt_time.set_title("Filtered ECG (Time Domain, First 10s)")
+    else:
+        ax_filt_time.set_title("Filtered ECG (Unavailable)")
+    ax_filt_time.set_xlabel("Time (s)")
+    ax_filt_time.set_ylabel("Amplitude")
+    ax_filt_time.set_xlim(0, T_VIS)
+    ax_filt_time.set_ylim(ymin, ymax)
+    ax_filt_time.axhline(0, color='black', linewidth=0.5)
+    ax_filt_time.grid(True, linestyle='--', alpha=0.5)
+    st.pyplot(fig_filt_time)
+
+with col6:
+    fig_filt_psd, ax_filt_psd = plt.subplots(figsize=(6, 3))
+    if ecg_filtered is not None:
+        ax_filt_psd.semilogy(f_filtered_sym, Pxx_filtered_sym, color="green")
+        ax_filt_psd.set_title("Filtered ECG (Power Spectral Density)")
+    else:
+        ax_filt_psd.set_title("Filtered ECG PSD (Unavailable)")
+    ax_filt_psd.set_xlabel("Frequency (Hz)")
+    ax_filt_psd.set_ylabel("Power/Frequency")
+    ax_filt_psd.set_xlim(-100, 100)
+    ax_filt_psd.grid(True, linestyle="--", alpha=0.5)
+    st.pyplot(fig_filt_psd)

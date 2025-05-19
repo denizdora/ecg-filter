@@ -125,7 +125,7 @@ def apply_wiener_filter(noisy_signal: np.ndarray, clean_signal: np.ndarray, orde
     # Convolve the *noisy* signal with the filter coefficients
     # 'same' mode keeps the output length equal to the input length and handles centering
     # For the symmetric filter, 'same' mode implies the output corresponds to the
-    # input sequence, appropriately shifted for the non-causal taps.
+    # input sequence, appropriately shifted for the non-causal
     filtered_signal = np.convolve(noisy_signal, h_wiener, mode='same')
 
     # Return filtered signal and internal details
@@ -261,7 +261,7 @@ if detailed:
 
             fig_h, ax_h = plt.subplots(figsize=(6, 3))
             ax_h.stem(np.arange(len(wiener_info['h'])), wiener_info["h"]) # Use np.arange for tap index
-            ax_h.set_xlabel("Tap index")
+            ax_h.set_xlabel("Index")
             ax_h.set_ylabel("Amplitude")
             ax_h.set_title("Wiener Filter Impulse Response")
             ax_h.grid(True, alpha=0.4)

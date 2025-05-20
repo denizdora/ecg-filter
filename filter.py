@@ -677,11 +677,11 @@ if show_clean:
 #     ecg_nonideal_raw, _ = apply_nonideal_wiener_filter(ecg_noisy, wiener_order, wiener_symmetric)
 #     ecg_nonideal_smooth, _ = apply_smoothed_wiener_filter(ecg_noisy, wiener_order, wiener_symmetric)
 
-    if show_nonideal_raw and ecg_nonideal_raw is not None:
+if show_nonideal_raw and ecg_nonideal_raw is not None:
         ax_dynamic.plot(time, ecg_nonideal_raw, label="Non-Ideal (Raw)", color="orange", linestyle="--", linewidth=1.5)
         plotted_any_main = True
 
-    if show_nonideal_smooth and ecg_nonideal_smooth is not None:
+if show_nonideal_smooth and ecg_nonideal_smooth is not None:
         ax_dynamic.plot(time, ecg_nonideal_smooth, label="Non-Ideal (Smoothed)", color="purple", linestyle="--", linewidth=1.5)
         plotted_any_main = True
 

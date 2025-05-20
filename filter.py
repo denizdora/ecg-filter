@@ -296,6 +296,13 @@ wiener_order = st.sidebar.select_slider(
     key="wiener_order"
 )
 
+st.sidebar.caption(
+    "Filter order 'p' determines the number of taps.(more explanations in detailed explanations part)\n"
+    "- Causal: p taps\n"
+    "- Symmetric: 2p+1 taps\n"
+    "- Higher order improves denoising but may overfit."
+)
+
 wiener_symmetric = st.sidebar.checkbox(
     "Use Symmetric (Non-Causal) Filter",
     value=False, # Or True, if you want symmetric by default

@@ -199,7 +199,11 @@ def apply_nonideal_wiener_filter(noisy_signal: np.ndarray, order: int, symmetric
         return None, None
 
 @st.cache_data
-def apply_smoothed_wiener_filter(noisy_signal: np.ndarray, order: int, symmetric: bool = False, ma_window: int = 15):
+def apply_smoothed_wiener_filter(
+    noisy_signal: np.ndarray,
+    order: int,
+    symmetric: bool = False,
+    ma_window: int = 15):
     """
     Applies a non-ideal Wiener filter using a smoothed version of the noisy signal
     to estimate the cross-correlation vector.
@@ -276,8 +280,23 @@ In this simulation, we generate a synthetic clean ECG, add noise, and then apply
 st.sidebar.header("Simulation Parameters")
 # Using unique keys for sliders for better stability in Streamlit
 duration = st.sidebar.select_slider("Signal Duration (s)", options=[15, 20, 25, 30, 35], value=25)
-fs = 200
-st.sidebar.write(f"Sampling Frequency: **{fs} Hz**")
+fs = st.sidebar.select_slider("Sampling Frequency (Hz)",
+                              options=[200, 300, 400, 500, 600,
+                               700, 800, 900, 1000], value=200)
+st.sidebar.write(f"Total Samples: **{duration * fs}**")
+bpm = st.sidebar.select_slider("Heart Rate (bpm)", options=list(range(40, 121)), value=70)
+hrstd = st.sidebar.select_slider(
+    "HRV Std (Heart Rate Variability)",
+    options=list(range(1, 21)),
+    value=5,
+    help="Controls the beat-to-beat variation in heart rate (in BPM). Higher values create more realistic variability in the synthetic ECG.",
+    key="hrstd"
+)
+
+st.sidebar.caption(
+    "**Note:** A higher HRV Std introduces more beat-to-beat irregularity. The default value of 5 represents a healthy resting rhythm."
+)
+
 noise_std = st.sidebar.select_slider("Noise Standard Deviation", options=[0.0, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40], value=0.20)
 
 st.sidebar.markdown("---") # Separator
@@ -330,10 +349,16 @@ st.sidebar.info("Built with NeuroKit2 & Streamlit")
 # --- Generate Signals ---
 # Cached ECG simulation - Uses the fixed RANDOM_STATE
 @st.cache_data
-def generate_clean_ecg(duration, fs):
+def generate_clean_ecg(duration, fs, bpm, hrstd):
     try:
       # Specify heart rate variability for a more realistic signal
-      return nk.ecg_simulate(duration=duration, sampling_rate=fs, method="ecgsyn", heart_rate=70, heart_rate_std=5, random_state=RANDOM_STATE)
+      return nk.ecg_simulate(
+          duration=duration,
+          sampling_rate=fs,
+          method="ecgsyn",
+          heart_rate=bpm,
+          heart_rate_std=hrstd,
+          random_state=RANDOM_STATE)
     except Exception as e:
       st.error(f"Error generating clean ECG: {e}. Try different parameters.")
       # Fallback to a simple sine wave if generation fails
@@ -341,21 +366,73 @@ def generate_clean_ecg(duration, fs):
       t = np.linspace(0, duration, int(fs * duration), endpoint=False)
       return 0.5 * np.sin(2 * np.pi * 1 * t) # 1 Hz sine wave (very basic)
 
-ecg_clean = generate_clean_ecg(duration, fs)
+@st.cache_data
+def extract_rr_intervals(signal: np.ndarray, fs: int):
+    """
+    Detects R-peaks and returns RR intervals in milliseconds.
+    Uses NeuroKit2's default method.
+    """
+    try:
+        ecg_proc, rpeaks = nk.ecg_peaks(signal, sampling_rate=fs)
+        rr_intervals = np.diff(rpeaks['ECG_R_Peaks']) / fs * 1000  # Convert to ms
+        return rr_intervals, rpeaks
+    except Exception as e:
+        st.warning(f"R-peak detection failed: {e}")
+        return None, None
+
+
+ecg_clean = generate_clean_ecg(duration, fs, bpm, hrstd)
 time = np.linspace(0, duration, len(ecg_clean), endpoint=False)
 
-# Add white Gaussian noise - Uses the fixed RANDOM_STATE
-# We need to regenerate the noise whenever noise_std changes, even if ECG is cached
-np.random.seed(RANDOM_STATE) # Reset seed to ensure same noise structure *given the parameters*
+# Add white Gaussian noise
+np.random.seed(RANDOM_STATE)
 noise = np.random.normal(loc=0, scale=noise_std, size=len(ecg_clean))
 ecg_noisy = ecg_clean + noise
 
-# --- Apply Wiener Filter ---
-st.header("Wiener Filter Results")
-
-# Apply the filter and get results + internals
+# --- Apply Ideal Wiener Filter ---
 ecg_filtered, wiener_info = apply_wiener_filter(ecg_noisy, ecg_clean, wiener_order, wiener_symmetric)
 filter_params_str = f"p={wiener_order}, symmetric={wiener_symmetric}"
+
+# --- R-Peak Detection for Clean, Noisy, Filtered ---
+rr_clean, rpeaks_clean = extract_rr_intervals(ecg_clean, fs)
+rr_noisy, rpeaks_noisy = extract_rr_intervals(ecg_noisy, fs)
+rr_filtered, rpeaks_filtered = extract_rr_intervals(ecg_filtered, fs) if ecg_filtered is not None else (None, None)
+
+# --- If Using Non-Ideal Filters ---
+if use_nonideal:
+    ecg_nonideal_raw, _ = apply_nonideal_wiener_filter(ecg_noisy, wiener_order, wiener_symmetric)
+    ecg_nonideal_smooth, _ = apply_smoothed_wiener_filter(ecg_noisy, wiener_order, wiener_symmetric)
+
+    rr_nonideal_raw, rpeaks_nonideal_raw = extract_rr_intervals(ecg_nonideal_raw, fs) if ecg_nonideal_raw is not None else (None, None)
+    rr_nonideal_smooth, rpeaks_nonideal_smooth = extract_rr_intervals(ecg_nonideal_smooth, fs) if ecg_nonideal_smooth is not None else (None, None)
+
+    rr_dict = {
+        "clean": rr_clean,
+        "noisy": rr_noisy,
+        "filtered": rr_filtered,
+        "nonideal_raw": rr_nonideal_raw,
+        "nonideal_smooth": rr_nonideal_smooth
+    }
+
+    rpeaks_dict = {
+        "clean": rpeaks_clean,
+        "noisy": rpeaks_noisy,
+        "filtered": rpeaks_filtered,
+        "nonideal_raw": rpeaks_nonideal_raw,
+        "nonideal_smooth": rpeaks_nonideal_smooth
+    }
+else:
+    rr_dict = {
+        "clean": rr_clean,
+        "noisy": rr_noisy,
+        "filtered": rr_filtered
+    }
+
+    rpeaks_dict = {
+        "clean": rpeaks_clean,
+        "noisy": rpeaks_noisy,
+        "filtered": rpeaks_filtered
+    }
 
 # --- Display Stats ---
 st.subheader("Signal Statistics & Filter Performance")
@@ -596,9 +673,9 @@ if show_clean:
     ax_dynamic.plot(time, ecg_clean, label="Clean ECG", color="blue", linestyle="--", alpha=0.8)
     plotted_any_main = True
 
-if use_nonideal:
-    ecg_nonideal_raw, _ = apply_nonideal_wiener_filter(ecg_noisy, wiener_order, wiener_symmetric)
-    ecg_nonideal_smooth, _ = apply_smoothed_wiener_filter(ecg_noisy, wiener_order, wiener_symmetric)
+# if use_nonideal:
+#     ecg_nonideal_raw, _ = apply_nonideal_wiener_filter(ecg_noisy, wiener_order, wiener_symmetric)
+#     ecg_nonideal_smooth, _ = apply_smoothed_wiener_filter(ecg_noisy, wiener_order, wiener_symmetric)
 
     if show_nonideal_raw and ecg_nonideal_raw is not None:
         ax_dynamic.plot(time, ecg_nonideal_raw, label="Non-Ideal (Raw)", color="orange", linestyle="--", linewidth=1.5)

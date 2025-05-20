@@ -145,6 +145,121 @@ def apply_wiener_filter(noisy_signal: np.ndarray, clean_signal: np.ndarray, orde
         order=order # Store order for display
     )
 
+@st.cache_data
+def apply_nonideal_wiener_filter(noisy_signal: np.ndarray, order: int, symmetric: bool = False):
+    """
+    Applies a non-ideal Wiener filter (no clean signal).
+    Approximates r_xs ≈ r_xx using only the noisy input.
+
+    Args:
+        noisy_signal (np.ndarray): Noisy input x[n]
+        order (int): Filter order p
+        symmetric (bool): Use symmetric (non-causal) filter?
+
+    Returns:
+        tuple: (filtered_signal, internals_dict) or (None, None) on failure
+    """
+    N = len(noisy_signal)
+    filter_length = order if not symmetric else 2 * order + 1
+
+    if N <= filter_length:
+        st.warning("Signal too short for the selected filter order.")
+        return None, None
+
+    phi_xx_full = np.correlate(noisy_signal, noisy_signal, mode='full')
+    center_idx = N - 1
+
+    try:
+        if not symmetric:
+            phi = phi_xx_full[center_idx : center_idx + order] / N
+            Rxx = toeplitz(phi)
+            Rxx_raw = Rxx.copy()
+            Rxs = phi.copy()  # approximate r_xs ≈ r_xx
+
+        else:
+            L = filter_length
+            phi = phi_xx_full[center_idx : center_idx + L] / N
+            Rxx = toeplitz(phi)
+            Rxx_raw = Rxx.copy()
+            start_idx = center_idx - order
+            end_idx = center_idx + order + 1
+            Rxs = phi_xx_full[start_idx:end_idx] / N  # also from autocorr
+
+        Rxx_reg = Rxx + 1e-6 * np.identity(Rxx.shape[0])
+        h = np.linalg.solve(Rxx_reg, Rxs)
+        filtered_signal = np.convolve(noisy_signal, h, mode='same')
+
+        return filtered_signal, dict(
+            h=h, Rxx=Rxx_reg, Rxx_raw=Rxx_raw, Rxs=Rxs,
+            symmetric=symmetric, order=order
+        )
+
+    except Exception as e:
+        st.error(f"Non-ideal filter error: {e}")
+        return None, None
+
+@st.cache_data
+def apply_smoothed_wiener_filter(noisy_signal: np.ndarray, order: int, symmetric: bool = False, ma_window: int = 15):
+    """
+    Applies a non-ideal Wiener filter using a smoothed version of the noisy signal
+    to estimate the cross-correlation vector.
+
+    Args:
+        noisy_signal (np.ndarray): Noisy input x[n]
+        order (int): Filter order p
+        symmetric (bool): Use symmetric (non-causal) filter?
+        ma_window (int): Moving average window size for smoothing (default = 15)
+
+    Returns:
+        tuple: (filtered_signal, internals_dict) or (None, None) on failure
+    """
+    N = len(noisy_signal)
+    filter_length = order if not symmetric else 2 * order + 1
+
+    if N <= filter_length or ma_window < 1:
+        st.warning("Signal too short or MA window too small.")
+        return None, None
+
+    # --- Step 1: Smoothed signal via moving average ---
+    smoothed_signal = np.convolve(noisy_signal, np.ones(ma_window) / ma_window, mode='same')
+
+    # --- Step 2: Compute autocorrelation matrix from noisy signal ---
+    phi_xx_full = np.correlate(noisy_signal, noisy_signal, mode='full')
+    center_idx = N - 1
+
+    # --- Step 3: Estimate cross-correlation using smoothed signal ---
+    phi_xs_full = np.correlate(noisy_signal, smoothed_signal, mode='full')
+
+    try:
+        if not symmetric:
+            phi = phi_xx_full[center_idx : center_idx + order] / N
+            Rxx = toeplitz(phi)
+            Rxx_raw = Rxx.copy()
+            Rxs = phi_xs_full[center_idx : center_idx + order] / N
+
+        else:
+            L = filter_length
+            phi = phi_xx_full[center_idx : center_idx + L] / N
+            Rxx = toeplitz(phi)
+            Rxx_raw = Rxx.copy()
+            start_idx = center_idx - order
+            end_idx = center_idx + order + 1
+            Rxs = phi_xs_full[start_idx:end_idx] / N
+
+        # Regularization and filter solve
+        Rxx_reg = Rxx + 1e-6 * np.identity(Rxx.shape[0])
+        h = np.linalg.solve(Rxx_reg, Rxs)
+        filtered_signal = np.convolve(noisy_signal, h, mode='same')
+
+        return filtered_signal, dict(
+            h=h, Rxx=Rxx_reg, Rxx_raw=Rxx_raw, Rxs=Rxs,
+            symmetric=symmetric, order=order
+        )
+
+    except Exception as e:
+        st.error(f"Smoothed non-ideal Wiener error: {e}")
+        return None, None
+
 
 # --- Streamlit App ---
 st.set_page_config(layout="wide", page_title="ECG Wiener Filter Demo", page_icon="📈")
@@ -190,6 +305,13 @@ wiener_symmetric = st.sidebar.checkbox(
          "selected above). Typically offers better performance but requires access to future data "
          "(buffering in real-time).",
     key="wiener_symmetric"
+)
+
+use_nonideal = st.sidebar.checkbox(
+    "Use Non-Ideal Wiener Filter (No Clean Signal)",
+    value=False,
+    help="In non-ideal mode, the filter is estimated without knowledge of the clean signal. "
+         "We approximate the cross-correlation between noisy and clean signals using autocorrelation."
 )
 
 st.sidebar.markdown("---") # Separator
@@ -341,7 +463,6 @@ if detailed:
     ax_cc.set_xlabel("Lag $k$")
     ax_cc.set_ylabel("Amplitude")
     ax_cc.grid(True)
-    fig_cc.tight_layout()
 
     st.pyplot(fig_cc)
 
@@ -401,6 +522,43 @@ if detailed:
     ax_conv.legend()
     st.pyplot(fig_conv)
 
+    st.markdown("---")
+        # --- Non-Ideal Wiener Explanation ---
+    st.markdown("### Non-Ideal Wiener Filtering (No Clean Signal)")
+    st.markdown(r"""
+    In practical scenarios, the clean signal $s[n]$ is usually unavailable. To overcome this, we tested two alternative methods to estimate the Wiener filter **without access to the clean signal**.
+
+    #### 1. Raw Autocorrelation Approximation
+    We assume:
+    $$
+    \mathbf{r}_{xs} \approx \mathbf{r}_{xx}
+    $$
+
+    This simplifies the Wiener-Hopf equation to:
+    $$
+    \mathbf{R}_{xx} \mathbf{h} \approx \mathbf{r}_{xx}
+    $$
+
+    Under this assumption, both the autocorrelation matrix $\mathbf{R}_{xx}$ and the cross-correlation vector $\mathbf{r}_{xs}$ are estimated from the noisy input signal $x[n]$ alone.
+
+    **Limitation:** This method often produces weak denoising, as the filter essentially learns to reproduce the noisy signal.
+
+    #### 2. Smoothed Estimate (Moving Average Proxy for $s[n]$)
+    We generate a pseudo-clean estimate $\hat{s}[n]$ by applying a simple **moving average** to $x[n]$, and use it to compute the cross-correlation:
+    $$
+    \mathbf{r}_{xs} \approx \text{corr}(x[n], \hat{s}[n])
+    $$
+
+    This gives a more realistic structure for $\mathbf{r}_{xs}$ while still not relying on the true clean signal.
+
+    **Advantage:** Often leads to noticeably better filtering, reducing high-frequency noise more effectively than the raw method.
+
+    Both methods still use the same autocorrelation matrix $\mathbf{R}_{xx}$ estimated from $x[n]$, but differ in how $\mathbf{r}_{xs}$ is constructed. By comparing their outputs in the time and frequency domains, we demonstrate the impact of improved cross-correlation estimation on denoising performance.
+    """)
+
+
+
+
 st.markdown("---")
 st.subheader("Time Domain Signal Plots")
 
@@ -408,6 +566,13 @@ st.subheader("Time Domain Signal Plots")
 show_clean = st.checkbox("Show Clean ECG", value=True)
 show_noisy = st.checkbox("Show Noisy ECG", value=True)
 show_filtered = st.checkbox("Show Filtered ECG", value=True if ecg_filtered is not None else False)
+if use_nonideal:
+    st.markdown("### Non-Ideal Filtered Options")
+    show_nonideal_raw = st.checkbox("Show Non-Ideal Filtered ECG (Raw Autocorr)", value=True)
+    show_nonideal_smooth = st.checkbox("Show Non-Ideal Filtered ECG (Smoothed Estimate)", value=True)
+else:
+    show_nonideal_raw = False
+    show_nonideal_smooth = False
 
 # Main full-length signal plot
 fig_dynamic, ax_dynamic = plt.subplots(figsize=(14, 4))
@@ -424,6 +589,19 @@ if show_filtered and ecg_filtered is not None:
 if show_clean:
     ax_dynamic.plot(time, ecg_clean, label="Clean ECG", color="blue", linestyle="--", alpha=0.8)
     plotted_any_main = True
+
+if use_nonideal:
+    ecg_nonideal_raw, _ = apply_nonideal_wiener_filter(ecg_noisy, wiener_order, wiener_symmetric)
+    ecg_nonideal_smooth, _ = apply_smoothed_wiener_filter(ecg_noisy, wiener_order, wiener_symmetric)
+
+    if show_nonideal_raw and ecg_nonideal_raw is not None:
+        ax_dynamic.plot(time, ecg_nonideal_raw, label="Non-Ideal (Raw)", color="orange", linestyle="--", linewidth=1.5)
+        plotted_any_main = True
+
+    if show_nonideal_smooth and ecg_nonideal_smooth is not None:
+        ax_dynamic.plot(time, ecg_nonideal_smooth, label="Non-Ideal (Smoothed)", color="purple", linestyle="--", linewidth=1.5)
+        plotted_any_main = True
+
 
 if not plotted_any_main:
     st.warning("Select at least one signal to display.")
@@ -463,6 +641,17 @@ if zoom_plot:
         ax_zoom.plot(time[:idx_zoom], ecg_clean[:idx_zoom], label="Clean ECG", color="blue",
                      linestyle="--", alpha=0.8)
         plotted_any = True
+
+    if use_nonideal:
+        if show_nonideal_raw and ecg_nonideal_raw is not None:
+            ax_zoom.plot(time[:idx_zoom], ecg_nonideal_raw[:idx_zoom],
+                         label="Non-Ideal (Raw)", color="orange", linestyle="--", linewidth=1.5)
+            plotted_any = True
+
+        if show_nonideal_smooth and ecg_nonideal_smooth is not None:
+            ax_zoom.plot(time[:idx_zoom], ecg_nonideal_smooth[:idx_zoom],
+                         label="Non-Ideal (Smoothed)", color="purple", linestyle="--", linewidth=1.5)
+            plotted_any = True
 
     if not plotted_any:
         st.warning("Select at least one signal to display in the zoom view.")
@@ -577,3 +766,58 @@ with col6:
     ax_filt_psd.set_xlim(-100, 100)
     ax_filt_psd.grid(True, linestyle="--", alpha=0.5)
     st.pyplot(fig_filt_psd)
+
+if use_nonideal:
+        # Row 4: Non-Ideal (Raw Autocorr)
+    f_nonideal_raw, Pxx_nonideal_raw = welch(ecg_nonideal_raw, fs=fs, nperseg=1024)
+    f_raw_sym, Pxx_raw_sym = mirror_spectrum(f_nonideal_raw, Pxx_nonideal_raw)
+
+    col7, col8 = st.columns(2)
+    with col7:
+        fig_raw_time, ax_raw_time = plt.subplots(figsize=(6, 3))
+        ax_raw_time.plot(time[:idx_vis], ecg_nonideal_raw[:idx_vis], color="orange")
+        ax_raw_time.set_title("Non-Ideal (Raw) - Time Domain")
+        ax_raw_time.set_xlabel("Time (s)")
+        ax_raw_time.set_ylabel("Amplitude")
+        ax_raw_time.set_xlim(0, T_VIS)
+        ax_raw_time.set_ylim(ymin, ymax)
+        ax_raw_time.axhline(0, color='black', linewidth=0.5)
+        ax_raw_time.grid(True, linestyle="--", alpha=0.5)
+        st.pyplot(fig_raw_time)
+
+    with col8:
+        fig_raw_psd, ax_raw_psd = plt.subplots(figsize=(6, 3))
+        ax_raw_psd.semilogy(f_raw_sym, Pxx_raw_sym, color="orange")
+        ax_raw_psd.set_title("Non-Ideal (Raw) - PSD")
+        ax_raw_psd.set_xlabel("Frequency (Hz)")
+        ax_raw_psd.set_ylabel("Power/Frequency")
+        ax_raw_psd.set_xlim(-100, 100)
+        ax_raw_psd.grid(True, linestyle="--", alpha=0.5)
+        st.pyplot(fig_raw_psd)
+
+    # Row 5: Non-Ideal (Smoothed Estimate)
+    f_nonideal_smooth, Pxx_nonideal_smooth = welch(ecg_nonideal_smooth, fs=fs, nperseg=1024)
+    f_smooth_sym, Pxx_smooth_sym = mirror_spectrum(f_nonideal_smooth, Pxx_nonideal_smooth)
+
+    col9, col10 = st.columns(2)
+    with col9:
+        fig_smooth_time, ax_smooth_time = plt.subplots(figsize=(6, 3))
+        ax_smooth_time.plot(time[:idx_vis], ecg_nonideal_smooth[:idx_vis], color="purple")
+        ax_smooth_time.set_title("Non-Ideal (Smoothed) - Time Domain")
+        ax_smooth_time.set_xlabel("Time (s)")
+        ax_smooth_time.set_ylabel("Amplitude")
+        ax_smooth_time.set_xlim(0, T_VIS)
+        ax_smooth_time.set_ylim(ymin, ymax)
+        ax_smooth_time.axhline(0, color='black', linewidth=0.5)
+        ax_smooth_time.grid(True, linestyle="--", alpha=0.5)
+        st.pyplot(fig_smooth_time)
+
+    with col10:
+        fig_smooth_psd, ax_smooth_psd = plt.subplots(figsize=(6, 3))
+        ax_smooth_psd.semilogy(f_smooth_sym, Pxx_smooth_sym, color="purple")
+        ax_smooth_psd.set_title("Non-Ideal (Smoothed) - PSD")
+        ax_smooth_psd.set_xlabel("Frequency (Hz)")
+        ax_smooth_psd.set_ylabel("Power/Frequency")
+        ax_smooth_psd.set_xlim(-100, 100)
+        ax_smooth_psd.grid(True, linestyle="--", alpha=0.5)
+        st.pyplot(fig_smooth_psd)

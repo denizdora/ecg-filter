@@ -275,20 +275,19 @@ In this simulation, we generate a synthetic clean ECG, add noise, and then apply
 # --- Sidebar Controls ---
 st.sidebar.header("Simulation Parameters")
 # Using unique keys for sliders for better stability in Streamlit
-duration = st.sidebar.slider("Signal Duration (s)", min_value=15, max_value=30, value=20, step=5, key="sim_duration")
+duration = st.sidebar.select_slider("Signal Duration (s)", options=[15, 20, 25, 30, 35], value=25)
 fs = 200
 st.sidebar.write(f"Sampling Frequency: **{fs} Hz**")
-noise_std = st.sidebar.slider("Noise Standard Deviation", min_value=0.0, max_value=0.4, value=0.2, step=0.05, key="noise_std")
+noise_std = st.sidebar.select_slider("Noise Standard Deviation", options=[0.0, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40], value=0.20)
 
 st.sidebar.markdown("---") # Separator
 
 st.sidebar.header("Wiener Filter Parameters")
-wiener_order = st.sidebar.slider(
+
+wiener_order = st.sidebar.select_slider(
     "Wiener Filter Order (p)",
-    min_value=1,
-    max_value=9,
+    options=list(range(1, 10)),
     value=4,
-    step=1,
     help="Sets the order parameter 'p'.\n"
          "*   For a **causal** filter (symmetric unchecked), the filter will have **'p' taps**.\n"
          "*   For a **symmetric** (non-causal) filter (checkbox checked), the filter will have **'2p+1' taps**.\n"

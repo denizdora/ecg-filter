@@ -1,5 +1,6 @@
 import streamlit as st
 import neurokit2 as nk
+import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.linalg import toeplitz
@@ -279,7 +280,7 @@ In this simulation, we generate a synthetic clean ECG, add noise, and then apply
 # --- Sidebar Controls ---
 st.sidebar.header("Simulation Parameters")
 # Using unique keys for sliders for better stability in Streamlit
-duration = st.sidebar.select_slider("Signal Duration (s)", options=[15, 20, 25, 30, 35], value=25)
+duration = st.sidebar.select_slider("Signal Duration (s)", options=[15, 20, 25, 30, 35], value=20)
 fs = st.sidebar.select_slider("Sampling Frequency (Hz)",
                               options=[200, 300, 400, 500, 600,
                                700, 800, 900, 1000], value=200)
@@ -393,46 +394,46 @@ ecg_noisy = ecg_clean + noise
 ecg_filtered, wiener_info = apply_wiener_filter(ecg_noisy, ecg_clean, wiener_order, wiener_symmetric)
 filter_params_str = f"p={wiener_order}, symmetric={wiener_symmetric}"
 
-# --- R-Peak Detection for Clean, Noisy, Filtered ---
-rr_clean, rpeaks_clean = extract_rr_intervals(ecg_clean, fs)
-rr_noisy, rpeaks_noisy = extract_rr_intervals(ecg_noisy, fs)
-rr_filtered, rpeaks_filtered = extract_rr_intervals(ecg_filtered, fs) if ecg_filtered is not None else (None, None)
+# # --- R-Peak Detection for Clean, Noisy, Filtered ---
+# rr_clean, rpeaks_clean = extract_rr_intervals(ecg_clean, fs)
+# rr_noisy, rpeaks_noisy = extract_rr_intervals(ecg_noisy, fs)
+# rr_filtered, rpeaks_filtered = extract_rr_intervals(ecg_filtered, fs) if ecg_filtered is not None else (None, None)
 
 # --- If Using Non-Ideal Filters ---
 if use_nonideal:
     ecg_nonideal_raw, _ = apply_nonideal_wiener_filter(ecg_noisy, wiener_order, wiener_symmetric)
     ecg_nonideal_smooth, _ = apply_smoothed_wiener_filter(ecg_noisy, wiener_order, wiener_symmetric)
 
-    rr_nonideal_raw, rpeaks_nonideal_raw = extract_rr_intervals(ecg_nonideal_raw, fs) if ecg_nonideal_raw is not None else (None, None)
-    rr_nonideal_smooth, rpeaks_nonideal_smooth = extract_rr_intervals(ecg_nonideal_smooth, fs) if ecg_nonideal_smooth is not None else (None, None)
+#     rr_nonideal_raw, rpeaks_nonideal_raw = extract_rr_intervals(ecg_nonideal_raw, fs) if ecg_nonideal_raw is not None else (None, None)
+#     rr_nonideal_smooth, rpeaks_nonideal_smooth = extract_rr_intervals(ecg_nonideal_smooth, fs) if ecg_nonideal_smooth is not None else (None, None)
 
-    rr_dict = {
-        "clean": rr_clean,
-        "noisy": rr_noisy,
-        "filtered": rr_filtered,
-        "nonideal_raw": rr_nonideal_raw,
-        "nonideal_smooth": rr_nonideal_smooth
-    }
+#     rr_dict = {
+#         "clean": rr_clean,
+#         "noisy": rr_noisy,
+#         "filtered": rr_filtered,
+#         "nonideal_raw": rr_nonideal_raw,
+#         "nonideal_smooth": rr_nonideal_smooth
+#     }
 
-    rpeaks_dict = {
-        "clean": rpeaks_clean,
-        "noisy": rpeaks_noisy,
-        "filtered": rpeaks_filtered,
-        "nonideal_raw": rpeaks_nonideal_raw,
-        "nonideal_smooth": rpeaks_nonideal_smooth
-    }
-else:
-    rr_dict = {
-        "clean": rr_clean,
-        "noisy": rr_noisy,
-        "filtered": rr_filtered
-    }
+#     rpeaks_dict = {
+#         "clean": rpeaks_clean,
+#         "noisy": rpeaks_noisy,
+#         "filtered": rpeaks_filtered,
+#         "nonideal_raw": rpeaks_nonideal_raw,
+#         "nonideal_smooth": rpeaks_nonideal_smooth
+#     }
+# else:
+#     rr_dict = {
+#         "clean": rr_clean,
+#         "noisy": rr_noisy,
+#         "filtered": rr_filtered
+#     }
 
-    rpeaks_dict = {
-        "clean": rpeaks_clean,
-        "noisy": rpeaks_noisy,
-        "filtered": rpeaks_filtered
-    }
+#     rpeaks_dict = {
+#         "clean": rpeaks_clean,
+#         "noisy": rpeaks_noisy,
+#         "filtered": rpeaks_filtered
+#     }
 
 # --- Display Stats ---
 st.subheader("Signal Statistics & Filter Performance")
@@ -466,6 +467,51 @@ if ecg_filtered is not None:
 else:
     col_mse2.write("**MSE (Filtered vs Clean):** N/A (Filtering Failed)")
     col_mse2.write("**MSE Improvement Factor:** N/A")
+
+# # --- Hrv Analysis ---
+# st.subheader("Heart Rate Variability (HRV) Analysis")
+
+# st.markdown("### Extended HRV Metrics (via NeuroKit2)")
+
+# hrv_extended = []
+
+# for label, rpeaks in rpeaks_dict.items():
+#     if rpeaks is None or "ECG_R_Peaks" not in rpeaks:
+#         continue
+#     try:
+#         hrv_result = nk.hrv(rpeaks, sampling_rate=fs, show=False)
+#         def get_metric(df, col):
+#             try:
+#                 return float(df[col].iloc[0])
+#             except:
+#                 return np.nan
+            
+#         hrv_extended.append({
+#             "Signal": label,
+#             "Mean RR (ms)": get_metric(hrv_result, "HRV_MeanNN"),
+#             "SDNN (ms)": get_metric(hrv_result, "HRV_SDNN"),
+#             "RMSSD (ms)": get_metric(hrv_result, "HRV_RMSSD"),
+#             "pNN50 (%)": get_metric(hrv_result, "HRV_pNN50"),
+#             "LF (ms²)": get_metric(hrv_result, "HRV_LF"),
+#             "HF (ms²)": get_metric(hrv_result, "HRV_HF"),
+#             "LF/HF": get_metric(hrv_result, "HRV_LFHF"),
+#             "SD1": get_metric(hrv_result, "HRV_SD1"),
+#             "SD2": get_metric(hrv_result, "HRV_SD2"),
+#         })
+
+#     except Exception as e:
+#         st.warning(f"Could not compute HRV for {label}: {e}")
+
+# if hrv_extended:
+#     df_extended = pd.DataFrame(hrv_extended).set_index("Signal")
+#     st.dataframe(df_extended.style.format("{:.2f}", na_rep="N/A"), use_container_width=True)
+# else:
+#     st.info("No HRV data available to display.")
+
+
+# st.markdown("### HRV Time-Domain Metrics")
+# st.dataframe(df_extended.style.format(precision=2), use_container_width=True)
+
 
 # ---------- DETAILED EXPLANATION & INTERNALS SECTION ---------------------------------
 if detailed:
@@ -502,6 +548,7 @@ if detailed:
 
     else:
         st.warning("Detailed internals are not available because the Wiener filter could not be computed.")
+
 if detailed:
     st.markdown("---")
     st.markdown("## Step-by-Step Internals & Visualizations")
